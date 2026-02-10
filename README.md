@@ -75,70 +75,6 @@ Access settings via the menu bar or when QuickMenu is running:
 - **Show in Menu Bar**: Toggle the menu bar icon visibility
 - **Accessibility Access**: Direct link to system settings
 
-## Development
-
-### Building
-
-```bash
-# Debug build
-swift build
-
-# Release build
-swift build -c release
-
-# Run
-swift run
-```
-
-### Project Setup
-
-No Xcode project required - uses Swift Package Manager:
-
-```bash
-# Open in Xcode (optional)
-open Package.swift
-```
-
-### Reset Onboarding
-
-To test the onboarding flow again:
-
-```bash
-defaults delete com.namuan.quickmenu hasCompletedOnboarding
-```
-
-## Troubleshooting
-
-### Menu doesn't appear
-
-1. Check that Accessibility permissions are granted
-2. Look for the 🖱️ icon in the menu bar
-3. Try clicking the menu bar icon instead of the hotkey
-4. Check Console.app for error messages
-
-### Hotkey not working
-
-- Ensure no other app is using Command + Shift + M
-- Try restarting QuickMenu
-- Check System Settings > Keyboard > Shortcuts for conflicts
-
-### Permissions issues
-
-1. Remove QuickMenu from System Settings > Privacy & Security > Accessibility
-2. Re-add it
-3. Restart QuickMenu
-4. The onboarding flow will guide you through the process
-
-## Contributing
-
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
@@ -152,8 +88,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Support
 
 For issues or suggestions, open an [issue](https://github.com/namuan/quick-menu/issues).
-
----
-
-**Bundle Identifier**: `com.namuan.quickmenu`  
-**Minimum macOS Version**: 13.0 (Ventura)
