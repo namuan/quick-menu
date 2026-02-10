@@ -12,7 +12,7 @@ It leverages macOS's Accessibility API to query and recreate menu structures, ma
 - **Actionable Items**: Menu selections trigger the original actions in the source app
 - **Onboarding Journey**: Guided setup with permission assistance on first launch
 - **Accessibility Integration**: Automatically checks and guides you through enabling permissions
-- **Status Bar Icon**: Quick access via menu bar icon with 🖱️ indicator
+- **Menu Bar Icon**: Quick access via menu bar icon with 🖱️ indicator
 - **Lightweight**: Runs as a background agent without a main window
 - **Apple Menu Skip**: Option to hide the Apple menu for cleaner menus
 
@@ -38,16 +38,6 @@ The install script will:
 3. Sign it with ad-hoc signing
 4. Install it to `~/Applications/QuickMenu.app`
 
-### Manual Build
-
-```bash
-git clone https://github.com/namuan/quick-menu.git
-cd quick-menu
-swift build -c release
-```
-
-Then manually create the app bundle or run the executable from `.build/release/QuickMenu`.
-
 ### First Launch Setup
 
 1. **Open QuickMenu**: Double-click `~/Applications/QuickMenu.app` or run:
@@ -71,53 +61,19 @@ Then manually create the app bundle or run the executable from `.build/release/Q
   - Press again to hide the menu
   - Works in any application
 
-### Status Bar
+### Menu Bar
 
 - Click the 🖱️ icon in your menu bar to show the menu
-- Access Settings from the status bar menu
+- Access Settings from the menu bar
 - Check permission status
 
 ### Settings
 
-Access settings via the status bar menu or when QuickMenu is running:
+Access settings via the menu bar or when QuickMenu is running:
 
 - **Skip Apple Menu**: Hide the Apple menu in captured menus
-- **Show in Status Bar**: Toggle the menu bar icon visibility
+- **Show in Menu Bar**: Toggle the menu bar icon visibility
 - **Accessibility Access**: Direct link to system settings
-
-## Project Structure
-
-```
-quick-menu/
-├── Package.swift              # Swift Package Manager manifest
-├── install.command            # One-click install script
-├── Resources/
-│   └── Info.plist            # App bundle configuration
-└── Sources/
-    └── QuickMenu/
-        ├── QuickMenuApp.swift     # App entry point
-        ├── AppDelegate.swift      # Main logic and permissions
-        ├── OnboardingView.swift   # First-time setup UI
-        ├── ContentView.swift      # Settings UI
-        └── MenuCapture.swift      # Menu building logic
-```
-
-## Technical Details
-
-### How It Works
-
-1. **Accessibility API**: Uses `AXUIElement` to query the frontmost application's menu bar
-2. **Menu Rebuilding**: Recursively traverses menu structure and creates an `NSMenu` copy
-3. **Action Proxying**: Stores original AX elements and triggers them when menu items are selected
-4. **Global Hotkey**: Registers a Carbon Event HotKey for system-wide shortcut capture
-5. **Toggle Support**: Tracks menu visibility state to allow showing/hiding with the same hotkey
-
-### Key Components
-
-- **Menu Capture**: `buildMenu(from:)` recursively builds NSMenu from AXUIElement hierarchy
-- **Permission Handling**: Checks `AXIsProcessTrustedWithOptions()` and guides users through setup
-- **Hotkey Registration**: Uses `RegisterEventHotKey` from Carbon framework
-- **Onboarding**: Three-step guided setup with automatic permission monitoring
 
 ## Development
 
@@ -156,8 +112,8 @@ defaults delete com.namuan.quickmenu hasCompletedOnboarding
 ### Menu doesn't appear
 
 1. Check that Accessibility permissions are granted
-2. Look for the 🖱️ icon in the status bar
-3. Try clicking the status bar icon instead of the hotkey
+2. Look for the 🖱️ icon in the menu bar
+3. Try clicking the menu bar icon instead of the hotkey
 4. Check Console.app for error messages
 
 ### Hotkey not working
