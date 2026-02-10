@@ -402,36 +402,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         Logger.shared.info("Menu built with \(rebuiltMenu.items.count) items")
         
-        // Get mouse location
+        // Get mouse location in screen coordinates
         let mouseLocation = NSEvent.mouseLocation
         Logger.shared.info("Mouse location: \(mouseLocation)")
         
-        // Use statusItem button to show menu at cursor position
-        if let button = statusItem?.button {
-            // Convert screen coordinates to button's coordinate system
-            let buttonFrame = button.window?.convertToScreen(button.frame) ?? button.frame
-            let xOffset = mouseLocation.x - buttonFrame.origin.x
-            let yOffset = mouseLocation.y - buttonFrame.origin.y
-            
-            Logger.shared.info("Showing menu from status bar button with offset: (\(xOffset), \(yOffset))")
-            
-            // Mark as visible
-            isMenuVisible = true
-            
-            // Show the menu
-            rebuiltMenu.popUp(positioning: nil, at: NSPoint(x: xOffset, y: yOffset), in: button)
-            
-            // Menu dismissed
-            isMenuVisible = false
-            Logger.shared.info("Menu dismissed")
-            
-            // Clear menu reference after delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                self?.currentMenu = nil
-                Logger.shared.info("Menu reference cleared")
-            }
-        } else {
-            Logger.shared.error("No status item button available")
+        // Create a window at the cursor position to anchor the menu
+        let cursorWindow = NSWindow(
+            contentRect: NSRect(x: mouseLocation.x, y: mouseLocation.y, width: 1, height: 1),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        cursorWindow.backgroundColor = .clear
+        cursorWindow.isOpaque = false
+        cursorWindow.hasShadow = false
+        cursorWindow.level = .popUpMenu
+        cursorWindow.ignoresMouseEvents = true
+        cursorWindow.orderFront(nil)
+        
+        // Store reference
+        currentMenuWindow = cursorWindow
+        
+        // Mark as visible
+        isMenuVisible = true
+        
+        // Show the menu at the cursor position
+        // The window's frame origin is already at screen coordinates, so (0,0) in the window
+        // corresponds to the mouse location
+        Logger.shared.info("Showing menu at cursor position")
+        rebuiltMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: cursorWindow.contentView)
+        
+        // Menu dismissed
+        isMenuVisible = false
+        Logger.shared.info("Menu dismissed")
+        
+        // Close the cursor window
+        cursorWindow.orderOut(nil)
+        currentMenuWindow = nil
+        
+        // Clear menu reference after delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.currentMenu = nil
+            Logger.shared.info("Menu reference cleared")
         }
         
         Logger.shared.info("triggerMenuRebuild completed")
