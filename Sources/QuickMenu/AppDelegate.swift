@@ -34,8 +34,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var permissionCheckTimer: Timer?
     var currentMenuWindow: NSWindow?
     var isMenuVisible = false
+    var currentMenu: NSMenu?  // Strong reference to prevent deallocation issues
+    var currentFrontmostApp: NSRunningApplication?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Logger.shared.info("=== QuickMenu Started ===")
+        Logger.shared.info("Log file location: \(Logger.shared.logFilePath)")
+        
         // Set defaults
         if UserDefaults.standard.object(forKey: UserDefaults.showInStatusBarKey) == nil {
             UserDefaults.standard.showInStatusBar = true
@@ -44,10 +49,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.skipAppleMenu = true
         }
         
+        Logger.shared.info("showInStatusBar: \(UserDefaults.standard.showInStatusBar)")
+        Logger.shared.info("skipAppleMenu: \(UserDefaults.standard.skipAppleMenu)")
+        Logger.shared.info("hasCompletedOnboarding: \(UserDefaults.standard.hasCompletedOnboarding)")
+        
         // Show onboarding if first launch
         if !UserDefaults.standard.hasCompletedOnboarding {
+            Logger.shared.info("Showing onboarding")
             showOnboarding()
         } else {
+            Logger.shared.info("Skipping onboarding, setting up directly")
             setupAfterOnboarding()
         }
     }
@@ -303,14 +314,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc func hotkeyPressed() {
+        Logger.shared.info("hotkeyPressed called")
         DispatchQueue.main.async {
+            Logger.shared.info("Processing hotkey on main thread")
             // Check permissions before triggering
-            guard self.checkAccessibilityPermissions(prompt: true) else { return }
+            guard self.checkAccessibilityPermissions(prompt: true) else {
+                Logger.shared.warning("Permission check failed")
+                return
+            }
+            
+            Logger.shared.info("isMenuVisible: \(self.isMenuVisible)")
             
             // Toggle menu visibility
             if self.isMenuVisible {
+                Logger.shared.info("Dismissing menu via hotkey")
                 self.dismissMenu()
             } else {
+                Logger.shared.info("Triggering menu rebuild via hotkey")
                 self.triggerMenuRebuild()
             }
         }
@@ -345,13 +365,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Menu Capture and Rebuild
     
     @objc func triggerMenuRebuild() {
-        // Dismiss any existing menu first
-        dismissMenu()
+        Logger.shared.info("triggerMenuRebuild called")
         
         guard let frontApp = NSWorkspace.shared.frontmostApplication else {
-            print("Could not get frontmost application")
+            Logger.shared.error("Could not get frontmost application")
             return
         }
+        
+        Logger.shared.info("Frontmost app: \(frontApp.localizedName ?? "Unknown") (pid: \(frontApp.processIdentifier))")
         
         let pid = frontApp.processIdentifier
         let appElement = AXUIElementCreateApplication(pid)
@@ -361,71 +382,93 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let menuBarResult = AXUIElementCopyAttributeValue(appElement, kAXMenuBarAttribute as CFString, &menuBarValue)
         
         guard menuBarResult == .success, let menuBar = menuBarValue else {
-            print("Failed to get menu bar for \(frontApp.localizedName ?? "Unknown")")
+            Logger.shared.error("Failed to get menu bar for \(frontApp.localizedName ?? "Unknown"), result: \(menuBarResult)")
             return
         }
+        
+        Logger.shared.info("Got menu bar, building menu...")
+        
+        // Store current frontmost app for later use
+        currentFrontmostApp = frontApp
         
         // Build the menu
-        guard let rebuiltMenu = buildMenu(from: menuBar as! AXUIElement) else {
-            print("Failed to rebuild menu")
+        guard let rebuiltMenu = buildMenu(from: menuBar as! AXUIElement, path: []) else {
+            Logger.shared.error("Failed to rebuild menu")
             return
         }
         
-        // Show at mouse location
+        // Keep strong reference to prevent autorelease issues
+        currentMenu = rebuiltMenu
+        
+        Logger.shared.info("Menu built with \(rebuiltMenu.items.count) items")
+        
+        // Get mouse location
         let mouseLocation = NSEvent.mouseLocation
+        Logger.shared.info("Mouse location: \(mouseLocation)")
         
-        currentMenuWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1, height: 1),
-                                   styleMask: .borderless,
-                                   backing: .buffered,
-                                   defer: false)
-        currentMenuWindow?.setFrameOrigin(mouseLocation)
-        currentMenuWindow?.makeKeyAndOrderFront(nil)
-        
-        // Track that we're about to show a menu
-        isMenuVisible = true
-        
-        // We need to show the menu on a background thread so the main thread
-        // can continue to receive hotkey events
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self, let window = self.currentMenuWindow else { return }
+        // Use statusItem button to show menu at cursor position
+        if let button = statusItem?.button {
+            // Convert screen coordinates to button's coordinate system
+            let buttonFrame = button.window?.convertToScreen(button.frame) ?? button.frame
+            let xOffset = mouseLocation.x - buttonFrame.origin.x
+            let yOffset = mouseLocation.y - buttonFrame.origin.y
             
-            // Show the menu (this blocks until menu is dismissed)
-            DispatchQueue.main.sync {
-                rebuiltMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: window.contentView)
-            }
+            Logger.shared.info("Showing menu from status bar button with offset: (\(xOffset), \(yOffset))")
             
-            // Menu was dismissed - clean up on main thread
-            DispatchQueue.main.async {
-                self.isMenuVisible = false
-                self.currentMenuWindow?.close()
-                self.currentMenuWindow = nil
+            // Mark as visible
+            isMenuVisible = true
+            
+            // Show the menu
+            rebuiltMenu.popUp(positioning: nil, at: NSPoint(x: xOffset, y: yOffset), in: button)
+            
+            // Menu dismissed
+            isMenuVisible = false
+            Logger.shared.info("Menu dismissed")
+            
+            // Clear menu reference after delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.currentMenu = nil
+                Logger.shared.info("Menu reference cleared")
             }
+        } else {
+            Logger.shared.error("No status item button available")
         }
+        
+        Logger.shared.info("triggerMenuRebuild completed")
     }
     
-    func buildMenu(from axElement: AXUIElement, depth: Int = 0) -> NSMenu? {
+    func buildMenu(from axElement: AXUIElement, depth: Int = 0, path: [Int] = []) -> NSMenu? {
+        Logger.shared.info("buildMenu called with depth: \(depth), path: \(path)")
+        
         var childrenValue: AnyObject?
         let childrenResult = AXUIElementCopyAttributeValue(axElement, kAXChildrenAttribute as CFString, &childrenValue)
         
         guard childrenResult == .success,
               let children = childrenValue as? [AXUIElement],
               !children.isEmpty else {
+            Logger.shared.warning("buildMenu: No children found or error: \(childrenResult)")
             return nil
         }
         
+        Logger.shared.info("buildMenu: Found \(children.count) children at depth \(depth)")
+        
         let menu = NSMenu(title: "")
         let skipAppleMenu = UserDefaults.standard.skipAppleMenu
+        var validIndex = 0
         
         for (index, child) in children.enumerated() {
             // Skip Apple menu (first item) if desired
             if depth == 0 && index == 0 && skipAppleMenu {
+                Logger.shared.info("buildMenu: Skipping Apple menu")
                 continue
             }
             
             // Get title
             var titleValue: AnyObject?
-            AXUIElementCopyAttributeValue(child, kAXTitleAttribute as CFString, &titleValue)
+            let titleResult = AXUIElementCopyAttributeValue(child, kAXTitleAttribute as CFString, &titleValue)
             let title = (titleValue as? String) ?? ""
+            
+            Logger.shared.debug("buildMenu: Child \(index) title: '\(title)', titleResult: \(titleResult)")
             
             // Check if enabled
             var enabledValue: AnyObject?
@@ -440,33 +483,102 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 continue
             }
             
+            Logger.shared.debug("buildMenu: Adding menu item '\(title)'")
+            
             let item = NSMenuItem(title: title, action: #selector(menuItemSelected(_:)), keyEquivalent: "")
             item.target = self
-            item.representedObject = child
+            // Store the path to this menu item instead of the AXUIElement
+            let itemPath = path + [validIndex]
+            item.representedObject = itemPath
             item.isEnabled = isEnabled
             
             // Recursively build submenu
-            if let submenu = buildMenu(from: child, depth: depth + 1) {
+            if let submenu = buildMenu(from: child, depth: depth + 1, path: itemPath) {
                 item.submenu = submenu
             }
             
             menu.addItem(item)
+            validIndex += 1
         }
         
+        Logger.shared.info("buildMenu: Created menu with \(menu.items.count) items at depth \(depth)")
         return menu.items.isEmpty ? nil : menu
     }
     
     @objc func menuItemSelected(_ sender: NSMenuItem) {
-        guard let axElement = sender.representedObject as! AXUIElement? else {
-            print("No AX element associated with menu item")
+        Logger.shared.info("menuItemSelected called for: \(sender.title)")
+        
+        guard let path = sender.representedObject as? [Int] else {
+            Logger.shared.error("No path associated with menu item: \(sender.title)")
             return
         }
         
-        let result = AXUIElementPerformAction(axElement, kAXPressAction as CFString)
+        Logger.shared.info("Menu item path: \(path)")
         
-        if result != .success {
-            print("Failed to perform action: \(result)")
+        // Re-query the AX element using the path
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+            Logger.shared.error("Could not get frontmost application")
+            return
         }
+        
+        let pid = frontApp.processIdentifier
+        let appElement = AXUIElementCreateApplication(pid)
+        
+        // Get the menu bar
+        var menuBarValue: AnyObject?
+        let menuBarResult = AXUIElementCopyAttributeValue(appElement, kAXMenuBarAttribute as CFString, &menuBarValue)
+        
+        guard menuBarResult == .success, menuBarValue != nil else {
+            Logger.shared.error("Failed to get menu bar")
+            return
+        }
+        
+        let menuBar = menuBarValue as! AXUIElement
+        
+        // Navigate to the menu item using the path
+        var currentElement: AXUIElement = menuBar
+        let skipAppleMenu = UserDefaults.standard.skipAppleMenu
+        var adjustedPath = path
+        
+        // Adjust path if we're skipping Apple menu
+        if skipAppleMenu && !path.isEmpty && path[0] > 0 {
+            adjustedPath[0] += 1
+        }
+        
+        for index in adjustedPath {
+            var childrenValue: AnyObject?
+            let result = AXUIElementCopyAttributeValue(currentElement, kAXChildrenAttribute as CFString, &childrenValue)
+            
+            guard result == .success,
+                  let children = childrenValue as? [AXUIElement],
+                  index < children.count else {
+                Logger.shared.error("Failed to navigate to menu item at index \(index)")
+                return
+            }
+            
+            currentElement = children[index]
+        }
+        
+        Logger.shared.info("Found AX element for menu item, performing action with delay")
+        
+        // Perform the action with a delay to ensure menu is closed
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard self != nil else {
+                Logger.shared.error("Self was nil when performing action")
+                return
+            }
+            
+            Logger.shared.info("Performing AXPressAction...")
+            let result = AXUIElementPerformAction(currentElement, kAXPressAction as CFString)
+            
+            if result == .success {
+                Logger.shared.info("Action performed successfully")
+            } else {
+                Logger.shared.error("Failed to perform action: \(result)")
+            }
+        }
+        
+        Logger.shared.info("menuItemSelected completed")
     }
 }
 
