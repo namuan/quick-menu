@@ -123,7 +123,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
         if let button = statusItem?.button {
-            button.title = "🖱️"
+            // Use app icon instead of emoji
+            if let appIcon = NSImage(named: "AppIcon") {
+                let iconSize: CGFloat = 18
+                appIcon.size = NSSize(width: iconSize, height: iconSize)
+                button.image = appIcon
+                button.image?.isTemplate = true
+            }
             button.action = #selector(statusBarClicked)
             button.target = self
         }
