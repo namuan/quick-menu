@@ -64,6 +64,31 @@ cp "$SCRIPT_DIR/Resources/Info.plist" "$APP_CONTENTS/Info.plist"
 # Make sure the Info.plist has the correct executable name
 /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable QuickMenu" "$APP_CONTENTS/Info.plist" 2>/dev/null || true
 
+# Convert and copy app icon
+echo "🎨 Converting icon..."
+ICONSET_DIR="$BUILD_DIR/AppIcon.iconset"
+mkdir -p "$ICONSET_DIR"
+
+# Create various icon sizes from the PNG
+sips -z 16 16 "$SCRIPT_DIR/assets/icon.png" --out "$ICONSET_DIR/icon_16x16.png"
+sips -z 32 32 "$SCRIPT_DIR/assets/icon.png" --out "$ICONSET_DIR/icon_16x16@2x.png"
+sips -z 32 32 "$SCRIPT_DIR/assets/icon.png" --out "$ICONSET_DIR/icon_32x32.png"
+sips -z 64 64 "$SCRIPT_DIR/assets/icon.png" --out "$ICONSET_DIR/icon_32x32@2x.png"
+sips -z 128 128 "$SCRIPT_DIR/assets/icon.png" --out "$ICONSET_DIR/icon_128x128.png"
+sips -z 256 256 "$SCRIPT_DIR/assets/icon.png" --out "$ICONSET_DIR/icon_128x128@2x.png"
+sips -z 256 256 "$SCRIPT_DIR/assets/icon.png" --out "$ICONSET_DIR/icon_256x256.png"
+sips -z 512 512 "$SCRIPT_DIR/assets/icon.png" --out "$ICONSET_DIR/icon_256x256@2x.png"
+sips -z 512 512 "$SCRIPT_DIR/assets/icon.png" --out "$ICONSET_DIR/icon_512x512.png"
+sips -z 1024 1024 "$SCRIPT_DIR/assets/icon.png" --out "$ICONSET_DIR/icon_512x512@2x.png"
+
+# Create .icns file
+iconutil -c icns "$ICONSET_DIR" -o "$APP_CONTENTS/Resources/AppIcon.icns"
+
+# Update Info.plist to reference the icon
+/usr/libexec/PlistBuddy -c "Set :CFBundleIconFile AppIcon" "$APP_CONTENTS/Info.plist" 2>/dev/null || true
+
+echo "✅ Icon converted and added!"
+
 echo "✅ App bundle created!"
 echo ""
 
