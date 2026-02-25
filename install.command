@@ -117,6 +117,11 @@ cp -R "$SCRIPT_DIR/$APP_BUNDLE" "$INSTALL_DIR/"
 echo "✅ Installed to $INSTALL_DIR/$APP_BUNDLE"
 echo ""
 
+# Clear any existing Accessibility permission so macOS will prompt again
+# (requires bundle identifier from Info.plist)
+echo "🔄 Resetting Accessibility permissions for com.namuan.quickmenu..."
+tccutil reset Accessibility com.namuan.quickmenu 2>/dev/null || true
+
 # Cleanup build directory
 echo "🧹 Cleaning up build files..."
 rm -rf "$BUILD_DIR"
