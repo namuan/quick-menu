@@ -43,9 +43,11 @@ struct OnboardingView: View {
             HStack {
                 if currentStep > 0 {
                     Button("Back") {
+                        Logger.shared.info("Onboarding back tapped from step \(currentStep)")
                         withAnimation {
                             currentStep -= 1
                         }
+                        Logger.shared.info("Onboarding moved to step \(currentStep)")
                     }
                     .buttonStyle(PlainButtonStyle())
                     .foregroundColor(.secondary)
@@ -55,10 +57,13 @@ struct OnboardingView: View {
                 
                 Button(action: {
                     if currentStep < totalSteps - 1 {
+                        Logger.shared.info("Onboarding continue tapped on step \(currentStep)")
                         withAnimation {
                             currentStep += 1
                         }
+                        Logger.shared.info("Onboarding moved to step \(currentStep)")
                     } else {
+                        Logger.shared.info("Onboarding completed from final step")
                         isPresented = false
                     }
                 }) {
@@ -79,10 +84,12 @@ struct OnboardingView: View {
         .frame(width: 560, height: 480)
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
+            Logger.shared.info("OnboardingView appeared")
             checkPermission()
         }
         .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
             if currentStep == 1 && !hasAccessibilityPermission {
+                Logger.shared.debug("Onboarding polling accessibility permission")
                 checkPermission()
             }
         }
@@ -175,6 +182,7 @@ struct OnboardingView: View {
             )
             
             Button(action: {
+                Logger.shared.info("Onboarding requested opening Accessibility settings")
                 openAccessibilitySettings()
             }) {
                 HStack {
@@ -313,13 +321,20 @@ struct OnboardingView: View {
     // MARK: - Helper Methods
     func checkPermission() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false] as CFDictionary
+        let previousValue = hasAccessibilityPermission
         hasAccessibilityPermission = AXIsProcessTrustedWithOptions(options)
+
+        if previousValue != hasAccessibilityPermission {
+            Logger.shared.info("Onboarding permission state changed to \(hasAccessibilityPermission)")
+        }
     }
     
     func openAccessibilitySettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
+            Logger.shared.error("Failed to create Accessibility settings URL from onboarding")
             return
         }
+        Logger.shared.info("Opening Accessibility settings from onboarding")
         NSWorkspace.shared.open(url)
     }
 }

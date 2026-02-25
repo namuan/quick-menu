@@ -8,11 +8,13 @@ It leverages macOS's Accessibility API to query and recreate menu structures, ma
 
 - **Menu Capture**: Automatically collects menu items from the active application
 - **Popup at Cursor**: Displays the rebuilt menu exactly where your mouse is pointing
+- **Menu + Submenu Search**: Search across nested menu items and open matching results quickly
 - **Toggle with Hotkey**: Show or hide the menu with Command + Shift + M
 - **Actionable Items**: Menu selections trigger the original actions in the source app
 - **Onboarding Journey**: Guided setup with permission assistance on first launch
 - **Accessibility Integration**: Automatically checks and guides you through enabling permissions
 - **Menu Bar Icon**: Quick access via menu bar icon with 🖱️ indicator
+- **Rolling File Logs**: Writes logs to `~/Library/Logs/QuickMenu/` with automatic log rotation
 - **Lightweight**: Runs as a background agent without a main window
 - **Apple Menu Skip**: Option to hide the Apple menu for cleaner menus
 
@@ -60,6 +62,17 @@ The install script will:
   - Press once to show the menu
   - Press again to hide the menu
   - Works in any application
+
+### Search Menus
+
+- Open the popup menu and select **Search Menu Items…** (or press **⌘F** while the menu is open)
+- Enter text to search across menu items and nested submenu items
+- Select a result to trigger the original menu action
+
+### Logs
+
+- Logs are written to `~/Library/Logs/QuickMenu/`
+- Active log file uses app name (`quickmenu.log`) and rotates automatically (`quickmenu.1.log` ... `quickmenu.5.log`)
 
 ### Menu Bar
 

@@ -43,8 +43,11 @@ struct ContentView: View {
                         Spacer()
                         
                         Button("Open System Settings") {
+                            Logger.shared.info("Opening Accessibility settings from ContentView")
                             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
                                 NSWorkspace.shared.open(url)
+                            } else {
+                                Logger.shared.error("Failed to create Accessibility settings URL in ContentView")
                             }
                         }
                     }
@@ -69,6 +72,9 @@ struct ContentView: View {
         }
         .frame(minWidth: 400, minHeight: 450)
         .padding()
+        .onAppear {
+            Logger.shared.info("ContentView (Settings) appeared")
+        }
     }
 }
 
