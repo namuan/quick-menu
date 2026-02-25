@@ -558,6 +558,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         panel.title = "Search Menu Items"
+        panel.identifier = NSUserInterfaceItemIdentifier("InstantSearchPanel")
         panel.isFloatingPanel = true
         panel.level = .popUpMenu
         panel.hidesOnDeactivate = false
@@ -849,6 +850,7 @@ struct InstantSearchView: View {
     let onClose: () -> Void
 
     @State private var query = ""
+    @State private var selectedIndex: Int?
     @FocusState private var isQueryFocused: Bool
 
     var matches: [SearchableMenuItem] {
@@ -860,14 +862,95 @@ struct InstantSearchView: View {
         return Array(onSearch(trimmed).prefix(maxResults))
     }
 
+    var selectableIndexes: [Int] {
+        matches.indices.filter { matches[$0].isEnabled }
+    }
+
+    var selectedItem: SearchableMenuItem? {
+        guard let selectedIndex,
+              matches.indices.contains(selectedIndex) else {
+            return nil
+        }
+        return matches[selectedIndex]
+    }
+
+    func moveSelection(forward: Bool) {
+        guard !selectableIndexes.isEmpty else {
+            selectedIndex = nil
+            return
+        }
+
+        guard let current = selectedIndex,
+              let position = selectableIndexes.firstIndex(of: current) else {
+            selectedIndex = selectableIndexes.first
+            return
+        }
+
+        let nextPosition: Int
+        if forward {
+            nextPosition = (position + 1) % selectableIndexes.count
+        } else {
+            nextPosition = (position - 1 + selectableIndexes.count) % selectableIndexes.count
+        }
+
+        selectedIndex = selectableIndexes[nextPosition]
+    }
+
+    func syncSelectionToMatches() {
+        guard !matches.isEmpty else {
+            selectedIndex = nil
+            return
+        }
+
+        if let selectedIndex, matches.indices.contains(selectedIndex), matches[selectedIndex].isEnabled {
+            return
+        }
+
+        selectedIndex = selectableIndexes.first
+    }
+
+    func handleSearchKeyDown(_ event: NSEvent) -> Bool {
+        guard event.window?.identifier?.rawValue == "InstantSearchPanel" else {
+            return false
+        }
+
+        switch event.keyCode {
+        case 48: // tab
+            guard !matches.isEmpty else {
+                return false
+            }
+
+            let isReverse = event.modifierFlags.contains(.shift)
+            moveSelection(forward: !isReverse)
+            return true
+        case 125: // down arrow
+            moveSelection(forward: true)
+            return true
+        case 126: // up arrow
+            moveSelection(forward: false)
+            return true
+        case 36, 76: // return / enter
+            if let selectedItem {
+                onSelect(selectedItem)
+                return true
+            }
+            return false
+        case 53: // escape
+            onClose()
+            return true
+        default:
+            return false
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             TextField("Type to search menu and submenu items", text: $query)
                 .textFieldStyle(.roundedBorder)
                 .focused($isQueryFocused)
                 .onSubmit {
-                    if let firstEnabled = matches.first(where: { $0.isEnabled }) {
-                        onSelect(firstEnabled)
+                    if let selectedItem {
+                        onSelect(selectedItem)
                     }
                 }
 
@@ -882,25 +965,42 @@ struct InstantSearchView: View {
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
-                List(matches, id: \.path) { item in
-                    Button(action: {
-                        onSelect(item)
-                    }) {
-                        HStack {
-                            Text(item.breadcrumb)
-                                .lineLimit(1)
-                            Spacer()
-                            if !item.isEnabled {
-                                Text("Disabled")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(matches.enumerated()), id: \.offset) { index, item in
+                            Button(action: {
+                                selectedIndex = index
+                                onSelect(item)
+                            }) {
+                                HStack(spacing: 10) {
+                                    Text(item.breadcrumb)
+                                        .lineLimit(1)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                                    if index == selectedIndex {
+                                        Text("Selected")
+                                            .font(.caption2)
+                                            .foregroundColor(.accentColor)
+                                    }
+
+                                    if !item.isEnabled {
+                                        Text("Disabled")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(index == selectedIndex ? Color.accentColor.opacity(0.18) : Color.clear)
+                                )
                             }
+                            .buttonStyle(.plain)
+                            .disabled(!item.isEnabled)
                         }
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!item.isEnabled)
                 }
-                .listStyle(.plain)
             }
 
             HStack {
@@ -912,11 +1012,66 @@ struct InstantSearchView: View {
                     onClose()
                 }
             }
+
+            Text("Hints: Tab/Shift+Tab cycle results • ↑/↓ move selection • Enter opens selected • Esc closes")
+                .font(.caption)
+                .foregroundColor(.secondary)
         }
         .padding(14)
         .frame(minWidth: 540, minHeight: 390)
         .onAppear {
-            isQueryFocused = true
+            syncSelectionToMatches()
+            DispatchQueue.main.async {
+                isQueryFocused = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                isQueryFocused = true
+            }
+        }
+        .onChange(of: query) { _ in
+            syncSelectionToMatches()
+        }
+        .onChange(of: matches.count) { _ in
+            syncSelectionToMatches()
+        }
+        .background(KeyEventMonitorView(onKeyDown: handleSearchKeyDown))
+    }
+}
+
+struct KeyEventMonitorView: NSViewRepresentable {
+    let onKeyDown: (NSEvent) -> Bool
+
+    class Coordinator {
+        var monitor: Any?
+        let onKeyDown: (NSEvent) -> Bool
+
+        init(onKeyDown: @escaping (NSEvent) -> Bool) {
+            self.onKeyDown = onKeyDown
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onKeyDown: onKeyDown)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if context.coordinator.onKeyDown(event) {
+                return nil
+            }
+            return event
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        if let monitor = coordinator.monitor {
+            NSEvent.removeMonitor(monitor)
+            coordinator.monitor = nil
         }
     }
 }
