@@ -100,7 +100,7 @@ struct OnboardingView: View {
         VStack(spacing: 24) {
             Spacer()
             
-            Image(systemName: "cursorarrow.click.2")
+            Image(systemName: "magnifyingglass.circle.fill")
                 .font(.system(size: 64))
                 .foregroundColor(.blue)
                 .symbolRenderingMode(.hierarchical)
@@ -109,15 +109,15 @@ struct OnboardingView: View {
                 .font(.title)
                 .fontWeight(.bold)
             
-            Text("Access any app's menu from your cursor. No more reaching for the menu bar.")
+            Text("Search and run any app's menu command instantly. No more reaching for the menu bar.")
                 .font(.body)
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
                 .padding(.horizontal, 40)
             
             VStack(alignment: .leading, spacing: 12) {
-                FeatureRow(icon: "keyboard", title: "Global Hotkey", description: "Press ⌘⇧M to toggle menu")
-                FeatureRow(icon: "cursorarrow", title: "Cursor Popup", description: "Menu appears at your mouse pointer")
+                FeatureRow(icon: "keyboard", title: "Global Hotkey", description: "Press ⌘⇧M to open instant search")
+                FeatureRow(icon: "magnifyingglass", title: "Instant Search", description: "Type to filter menu and submenu items")
                 FeatureRow(icon: "checkmark.shield", title: "Full Control", description: "Works with all menu items and shortcuts")
             }
             .padding(.horizontal, 40)
@@ -255,15 +255,15 @@ struct OnboardingView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Command + Shift + M")
                             .font(.headline)
-                        Text("Toggle the menu at your cursor (show/hide)")
+                        Text("Open or close instant menu search")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
                 }
                 
                 HStack(spacing: 16) {
-                    Text("🖱️")
-                        .font(.system(size: 24))
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 20, weight: .semibold))
                         .frame(width: 40, height: 40)
                         .background(Color.blue.opacity(0.2))
                         .cornerRadius(8)
@@ -271,7 +271,7 @@ struct OnboardingView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Status Bar Icon")
                             .font(.headline)
-                        Text("Click the icon in your menu bar")
+                        Text("Open search from the status bar menu")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }

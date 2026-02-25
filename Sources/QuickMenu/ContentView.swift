@@ -61,7 +61,7 @@ struct ContentView: View {
                 Text("Usage")
                     .font(.headline)
                 
-                Text("Press Command + Shift + M to toggle the menu from the frontmost application at your cursor location. Press it again to hide the menu.")
+                Text("Press Command + Shift + M to open instant search for the frontmost application. Press it again to close the search dialog.")
                     .font(.body)
                     .multilineTextAlignment(.center)
                     .foregroundColor(.secondary)

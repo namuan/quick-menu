@@ -313,7 +313,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Show success notification
         let alert = NSAlert()
         alert.messageText = "Accessibility Access Granted"
-        alert.informativeText = "Thank you! QuickMenu now has the permissions it needs. You can start using Command + Shift + M to access menus at your cursor."
+        alert.informativeText = "Thank you! QuickMenu now has the permissions it needs. You can start using Command + Shift + M to open instant menu search."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Got it!")
         alert.runModal()

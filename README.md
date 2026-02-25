@@ -1,22 +1,25 @@
 # QuickMenu
 
-QuickMenu is a Swift native macOS application that captures the menu items from the frontmost application and rebuilds them as a popup menu at your current mouse pointer location. This tool enhances productivity by allowing quick access to app menus without navigating to the menu bar.
+QuickMenu is a Swift native macOS application that captures menu items from the frontmost application and opens an instant search dialog so you can run commands quickly without going to the macOS menu bar.
 
 It leverages macOS's Accessibility API to query and recreate menu structures, making it ideal for users who want seamless menu interactions.
 
 ## Features
 
 - **Menu Capture**: Automatically collects menu items from the active application
-- **Popup at Cursor**: Displays the rebuilt menu exactly where your mouse is pointing
-- **Menu + Submenu Search**: Search across nested menu items and open matching results quickly
+- **Instant Search Dialog**: Opens directly (no intermediate popup menu)
+- **Menu + Submenu Search**: Searches across nested menu items and executes matches quickly
+- **Top-Level Defaults**: Shows top-level menu items before you type anything
 - **Toggle with Hotkey**: Open or close instant menu search with Command + Shift + M
+- **Status Bar Access**: Launch search from the status bar menu
+- **Active-Screen Centering**: Opens the search dialog centered on the currently active screen
+- **Keyboard Navigation**: Supports Tab/Shift+Tab, arrow keys, Enter, and Esc in search
 - **Actionable Items**: Menu selections trigger the original actions in the source app
 - **Onboarding Journey**: Guided setup with permission assistance on first launch
 - **Accessibility Integration**: Automatically checks and guides you through enabling permissions
-- **Menu Bar Icon**: Quick access via menu bar icon with 🖱️ indicator
 - **Rolling File Logs**: Writes logs to `~/Library/Logs/QuickMenu/` with automatic log rotation
 - **Lightweight**: Runs as a background agent without a main window
-- **Apple Menu Skip**: Option to hide the Apple menu for cleaner menus
+- **Apple Menu Skipped by Default**: Excludes the Apple menu from indexed results by default
 
 ## Requirements
 
@@ -40,6 +43,8 @@ The install script will:
 3. Sign it with ad-hoc signing
 4. Install it to `~/Applications/QuickMenu.app`
 
+Note: each install run resets existing Accessibility approval for `com.namuan.quickmenu` so macOS can prompt again.
+
 ### First Launch Setup
 
 1. **Open QuickMenu**: Double-click `~/Applications/QuickMenu.app` or run:
@@ -61,13 +66,19 @@ The install script will:
 - **Command + Shift + M**: Toggle instant menu search
    - Press once to open the search dialog
    - Press again to close it
-  - Works in any application
+   - Works in any application
 
 ### Search Menus
 
-- Open the popup menu and select **Search Menu Items…** (or press **⌘F** while the menu is open)
-- Enter text to search across menu items and nested submenu items
-- Select a result to trigger the original menu action
+- Press **Command + Shift + M** or use the status bar menu item **Search Menu Items**
+- The dialog opens centered on the active screen
+- By default, it shows top-level menu items for the frontmost app
+- Type to filter across top-level and nested submenu items
+- Use keyboard shortcuts in search:
+   - `Tab` / `Shift+Tab`: cycle results
+   - `↑` / `↓`: move selection
+   - `Enter`: execute selected item
+   - `Esc`: close search
 
 ### Logs
 
@@ -76,7 +87,7 @@ The install script will:
 
 ### Menu Bar
 
-- Click the 🖱️ icon in your menu bar to show the menu
+- Click the QuickMenu status bar icon to open the menu
 - Access Settings from the menu bar
 - Check permission status
 
@@ -84,8 +95,8 @@ The install script will:
 
 Access settings via the menu bar or when QuickMenu is running:
 
-- **Skip Apple Menu**: Hide the Apple menu in captured menus
-- **Show in Menu Bar**: Toggle the menu bar icon visibility
+- **Hotkey Display**: Shows the current hotkey
+- **Menu Options Section**: Includes controls for skip Apple menu and status bar visibility
 - **Accessibility Access**: Direct link to system settings
 
 ## License
