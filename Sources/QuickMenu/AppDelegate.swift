@@ -447,7 +447,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func showInstantSearchWindow(with searchableItems: [SearchableMenuItem]) {
         closeSearchWindow()
 
-        let panelSize = NSSize(width: 560, height: 420)
+        let panelSize = NSSize(width: 700, height: 520)
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: panelSize),
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -492,16 +492,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func positionSearchWindow(_ panel: NSPanel, size: NSSize) {
-        let mouseLocation = NSEvent.mouseLocation
-        var origin = NSPoint(x: mouseLocation.x - (size.width / 2), y: mouseLocation.y - 80)
+        let activeScreen = currentActiveScreen()
+        let targetFrame = activeScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? NSScreen.screens.first?.visibleFrame
 
-        if let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) {
-            let visible = screen.visibleFrame
-            origin.x = min(max(origin.x, visible.minX), visible.maxX - size.width)
-            origin.y = min(max(origin.y, visible.minY), visible.maxY - size.height)
+        guard let frame = targetFrame else {
+            panel.center()
+            return
         }
 
+        let origin = NSPoint(
+            x: frame.midX - (size.width / 2),
+            y: frame.midY - (size.height / 2)
+        )
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        Logger.shared.info("Positioned search window centered on active screen")
+    }
+
+    func currentActiveScreen() -> NSScreen? {
+        if let screen = NSApp.keyWindow?.screen {
+            return screen
+        }
+
+        if let screen = NSApp.mainWindow?.screen {
+            return screen
+        }
+
+        if let screen = NSScreen.main {
+            return screen
+        }
+
+        let mouseLocation = NSEvent.mouseLocation
+        if let mouseScreen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) {
+            return mouseScreen
+        }
+
+        return NSScreen.screens.first
     }
 
     func closeSearchWindow() {
@@ -919,7 +944,7 @@ struct InstantSearchView: View {
                 .foregroundColor(.secondary)
         }
         .padding(14)
-        .frame(minWidth: 540, minHeight: 390)
+        .frame(minWidth: 680, minHeight: 490)
         .onAppear {
             syncSelectionToMatches()
             DispatchQueue.main.async {
