@@ -39,10 +39,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var settingsWindow: NSWindow?
     var onboardingWindow: NSWindow?
     var permissionCheckTimer: Timer?
-    var currentMenuWindow: NSWindow?
     var searchWindow: NSPanel?
-    var isMenuVisible = false
-    var currentMenu: NSMenu?  // Strong reference to prevent deallocation issues
     var currentFrontmostApp: NSRunningApplication?
     var currentMenuSearchIndex: [SearchableMenuItem] = []
     let maxSearchResults = 50
@@ -188,7 +185,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(NSMenuItem.separator())
         }
         
-        menu.addItem(NSMenuItem(title: "Show Menu at Cursor", action: #selector(triggerMenuRebuild), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Search Menu Items", action: #selector(triggerMenuRebuild), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(showSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
@@ -386,47 +383,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 Logger.shared.warning("Permission check failed")
                 return
             }
-            
-            Logger.shared.info("isMenuVisible: \(self.isMenuVisible)")
-            
-            // Toggle menu visibility
-            if self.isMenuVisible {
-                Logger.shared.info("Dismissing menu via hotkey")
-                self.dismissMenu()
+
+            if self.searchWindow != nil {
+                Logger.shared.info("Closing search dialog via hotkey")
+                self.closeSearchWindow()
             } else {
-                Logger.shared.info("Triggering menu rebuild via hotkey")
+                Logger.shared.info("Opening search dialog via hotkey")
                 self.triggerMenuRebuild()
             }
-        }
-    }
-    
-    func dismissMenu() {
-        Logger.shared.info("Dismiss menu requested")
-        closeSearchWindow()
-        // If a menu is currently showing, we need to dismiss it
-        // Since NSMenu.popUp() is modal, we simulate Escape key to close it
-        if isMenuVisible {
-            simulateEscapeKey()
-        }
-        
-        currentMenuWindow?.close()
-        currentMenuWindow = nil
-        isMenuVisible = false
-        Logger.shared.info("Menu dismissed and cursor window cleared")
-    }
-    
-    func simulateEscapeKey() {
-        Logger.shared.debug("Simulating Escape key press")
-        let source = CGEventSource(stateID: .combinedSessionState)
-        
-        // Create key down event for Escape (key code 53)
-        if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 53, keyDown: true) {
-            keyDown.post(tap: .cghidEventTap)
-        }
-        
-        // Create key up event for Escape
-        if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 53, keyDown: false) {
-            keyUp.post(tap: .cghidEventTap)
         }
     }
     
@@ -467,84 +431,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         currentMenuSearchIndex = collectSearchableMenuItems(from: rebuiltMenu)
         Logger.shared.info("Indexed \(currentMenuSearchIndex.count) searchable menu entries")
-        injectSearchMenuItem(into: rebuiltMenu)
-        
-        // Keep strong reference to prevent autorelease issues
-        currentMenu = rebuiltMenu
-        
-        Logger.shared.info("Menu built with \(rebuiltMenu.items.count) items")
-        Logger.shared.info("Showing searchable menu at cursor")
-        presentMenuAtCursor(rebuiltMenu)
-        
-        // Clear menu reference after delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.currentMenu = nil
-            self?.currentMenuSearchIndex = []
-            Logger.shared.info("Menu reference and search index cleared")
-        }
-        
-        Logger.shared.info("triggerMenuRebuild completed")
-    }
 
-    func presentMenuAtCursor(_ menu: NSMenu) {
-        let mouseLocation = NSEvent.mouseLocation
-        Logger.shared.info("Mouse location: \(mouseLocation)")
-        
-        // Create a window at the cursor position to anchor the menu
-        let cursorWindow = NSWindow(
-            contentRect: NSRect(x: mouseLocation.x, y: mouseLocation.y, width: 1, height: 1),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        cursorWindow.backgroundColor = .clear
-        cursorWindow.isOpaque = false
-        cursorWindow.hasShadow = false
-        cursorWindow.level = .popUpMenu
-        cursorWindow.ignoresMouseEvents = true
-        cursorWindow.orderFront(nil)
-        
-        // Store reference
-        currentMenuWindow = cursorWindow
-        
-        // Mark as visible
-        isMenuVisible = true
-        
-        // Show the menu at the cursor position
-        // The window's frame origin is already at screen coordinates, so (0,0) in the window
-        // corresponds to the mouse location
-        Logger.shared.info("Showing menu at cursor position")
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: cursorWindow.contentView)
-        
-        // Menu dismissed
-        isMenuVisible = false
-        Logger.shared.info("Menu dismissed")
-        
-        // Close the cursor window
-        cursorWindow.orderOut(nil)
-        currentMenuWindow = nil
-        Logger.shared.debug("Cursor anchor window closed")
-    }
-
-    func injectSearchMenuItem(into menu: NSMenu) {
-        let searchItem = NSMenuItem(title: "Search Menu Items…", action: #selector(showSearchPrompt(_:)), keyEquivalent: "f")
-        searchItem.keyEquivalentModifierMask = [.command]
-        searchItem.target = self
-        menu.insertItem(searchItem, at: 0)
-        menu.insertItem(NSMenuItem.separator(), at: 1)
-        Logger.shared.debug("Search item added to menu")
-    }
-
-    @objc func showSearchPrompt(_ sender: NSMenuItem) {
-        Logger.shared.info("Search menu item selected")
-        let searchableItems = currentMenuSearchIndex
-
-        guard !searchableItems.isEmpty else {
-            Logger.shared.warning("Search requested but no indexed menu items are available")
+        guard !currentMenuSearchIndex.isEmpty else {
+            Logger.shared.warning("No searchable entries were found")
             return
         }
 
-        showInstantSearchWindow(with: searchableItems)
+        Logger.shared.info("Menu built with \(rebuiltMenu.items.count) top-level item(s)")
+        Logger.shared.info("Opening instant search directly")
+        showInstantSearchWindow(with: currentMenuSearchIndex)
+        
+        Logger.shared.info("triggerMenuRebuild completed")
     }
 
     func showInstantSearchWindow(with searchableItems: [SearchableMenuItem]) {
@@ -566,6 +463,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let searchView = InstantSearchView(
             maxResults: maxSearchResults,
+            defaultItems: searchableItems.filter { $0.path.count == 1 },
             onSearch: { [weak self] query in
                 guard let self = self else {
                     return []
@@ -614,6 +512,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.orderOut(nil)
         window.close()
         searchWindow = nil
+        currentMenuSearchIndex = []
+        Logger.shared.debug("Search window closed and index cleared")
     }
 
     func executeMenuItem(path: [Int], title: String) {
@@ -845,6 +745,7 @@ extension AppDelegate: NSWindowDelegate {
 
 struct InstantSearchView: View {
     let maxResults: Int
+    let defaultItems: [SearchableMenuItem]
     let onSearch: (String) -> [SearchableMenuItem]
     let onSelect: (SearchableMenuItem) -> Void
     let onClose: () -> Void
@@ -856,7 +757,7 @@ struct InstantSearchView: View {
     var matches: [SearchableMenuItem] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            return []
+            return Array(defaultItems.prefix(maxResults))
         }
 
         return Array(onSearch(trimmed).prefix(maxResults))
@@ -954,8 +855,8 @@ struct InstantSearchView: View {
                     }
                 }
 
-            if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("Start typing to get instant matches")
+            if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && matches.isEmpty {
+                Text("No top-level menu items found")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1013,7 +914,7 @@ struct InstantSearchView: View {
                 }
             }
 
-            Text("Hints: Tab/Shift+Tab cycle results • ↑/↓ move selection • Enter opens selected • Esc closes")
+            Text("Hints: Type to filter • Tab/Shift+Tab cycle results • ↑/↓ move selection • Enter opens selected • Esc closes")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }

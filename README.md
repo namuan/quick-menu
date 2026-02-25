@@ -9,7 +9,7 @@ It leverages macOS's Accessibility API to query and recreate menu structures, ma
 - **Menu Capture**: Automatically collects menu items from the active application
 - **Popup at Cursor**: Displays the rebuilt menu exactly where your mouse is pointing
 - **Menu + Submenu Search**: Search across nested menu items and open matching results quickly
-- **Toggle with Hotkey**: Show or hide the menu with Command + Shift + M
+- **Toggle with Hotkey**: Open or close instant menu search with Command + Shift + M
 - **Actionable Items**: Menu selections trigger the original actions in the source app
 - **Onboarding Journey**: Guided setup with permission assistance on first launch
 - **Accessibility Integration**: Automatically checks and guides you through enabling permissions
@@ -52,15 +52,15 @@ The install script will:
    - Or manually go to System Settings > Privacy & Security > Accessibility
    - Enable QuickMenu in the list
 
-3. **Start Using**: Press Command + Shift + M to show the menu at your cursor
+3. **Start Using**: Press Command + Shift + M to open instant menu search
 
 ## Usage
 
 ### Global Hotkey
 
-- **Command + Shift + M**: Toggle the menu at your cursor position
-  - Press once to show the menu
-  - Press again to hide the menu
+- **Command + Shift + M**: Toggle instant menu search
+   - Press once to open the search dialog
+   - Press again to close it
   - Works in any application
 
 ### Search Menus
