@@ -462,6 +462,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.level = .popUpMenu
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.moveToActiveSpace, .transient]
+        panel.hasShadow = true
+        panel.isOpaque = false
+        panel.backgroundColor = .windowBackgroundColor
 
         let searchView = InstantSearchView(
             maxResults: maxSearchResults,
@@ -485,12 +488,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         panel.contentView = NSHostingView(rootView: searchView)
+    applyHaloEffect(to: panel)
         positionSearchWindow(panel, size: panelSize)
 
         searchWindow = panel
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         Logger.shared.info("Instant search window displayed")
+    }
+
+    func applyHaloEffect(to panel: NSPanel) {
+        guard let contentView = panel.contentView else {
+            return
+        }
+
+        contentView.wantsLayer = true
+        guard let layer = contentView.layer else {
+            return
+        }
+
+        let cornerRadius: CGFloat = 10
+        layer.cornerRadius = cornerRadius
+        layer.masksToBounds = false
+        layer.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        layer.borderWidth = 1
+        layer.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.45).cgColor
+        layer.shadowColor = NSColor.controlAccentColor.withAlphaComponent(0.35).cgColor
+        layer.shadowOpacity = 1
+        layer.shadowRadius = 14
+        layer.shadowOffset = .zero
+        Logger.shared.debug("Applied halo styling to instant search panel")
     }
 
     func positionSearchWindow(_ panel: NSPanel, size: NSSize) {
