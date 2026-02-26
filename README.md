@@ -4,6 +4,12 @@ QuickMenu is a Swift native macOS application that captures menu items from the 
 
 It leverages macOS's Accessibility API to query and recreate menu structures, making it ideal for users who want seamless menu interactions.
 
+## Demo
+
+<video src="assets/quickmenu-intro.mp4" controls muted loop width="900"></video>
+
+If the video doesn't render in your viewer, open it directly: [quickmenu-intro.mp4](assets/quickmenu-intro.mp4)
+
 ## Features
 
 - **Menu Capture**: Automatically collects menu items from the active application
