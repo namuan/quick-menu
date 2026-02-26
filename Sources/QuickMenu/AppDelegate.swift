@@ -43,6 +43,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var currentFrontmostApp: NSRunningApplication?
     var currentMenuSearchIndex: [SearchableMenuItem] = []
     let maxSearchResults = 50
+    let maxActionDispatchAttempts = 4
+    let actionDispatchRetryDelay: TimeInterval = 0.08
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.shared.info("=== QuickMenu Started ===")
@@ -694,59 +696,233 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         Logger.shared.info("Executing action against app: \(targetApp.localizedName ?? "Unknown") (pid: \(targetApp.processIdentifier))")
-        targetApp.activate(options: [.activateIgnoringOtherApps])
-
-        let pid = targetApp.processIdentifier
-        let appElement = AXUIElementCreateApplication(pid)
-        
-        // Get the menu bar
-        var menuBarValue: AnyObject?
-        let menuBarResult = AXUIElementCopyAttributeValue(appElement, kAXMenuBarAttribute as CFString, &menuBarValue)
-        
-        guard menuBarResult == .success, menuBarValue != nil else {
-            Logger.shared.error("Failed to get menu bar")
-            return
-        }
-        
-        let menuBar = menuBarValue as! AXUIElement
-        
-        // Navigate to the menu item using the path
-        var currentElement: AXUIElement = menuBar
-
-        for index in path {
-            var childrenValue: AnyObject?
-            let result = AXUIElementCopyAttributeValue(currentElement, kAXChildrenAttribute as CFString, &childrenValue)
-            
-            guard result == .success,
-                  let children = childrenValue as? [AXUIElement],
-                  index < children.count else {
-                Logger.shared.error("Failed to navigate to menu item at index \(index)")
-                return
-            }
-            
-            currentElement = children[index]
-        }
-        
-        Logger.shared.info("Found AX element for menu item, performing action with delay")
-        
-        // Perform the action with a delay to ensure menu is closed
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            guard self != nil else {
-                Logger.shared.error("Self was nil when performing action")
-                return
-            }
-            
-            Logger.shared.info("Performing AXPressAction...")
-            let result = AXUIElementPerformAction(currentElement, kAXPressAction as CFString)
-            
-            if result == .success {
-                Logger.shared.info("Action performed successfully")
-            } else {
-                Logger.shared.error("Failed to perform action: \(result)")
-            }
-        }
+        let didActivate = targetApp.activate(options: [.activateIgnoringOtherApps])
+        Logger.shared.info("Target activation request result: \(didActivate)")
+        executeMenuItemAction(path: path, title: sender.title, targetApp: targetApp, attempt: 1)
         
         Logger.shared.info("menuItemSelected completed")
+    }
+
+    func executeMenuItemAction(path: [Int], title: String, targetApp: NSRunningApplication, attempt: Int) {
+        let pid = targetApp.processIdentifier
+        if !targetApp.isActive {
+            let didActivate = targetApp.activate(options: [.activateIgnoringOtherApps])
+            Logger.shared.warning("Target app not active on attempt \(attempt); activation requested=\(didActivate)")
+            scheduleMenuItemRetry(path: path, title: title, targetApp: targetApp, attempt: attempt, reason: "Target app is not active yet")
+            return
+        }
+
+        guard let targetElement = resolveMenuElement(path: path, pid: pid) else {
+            scheduleMenuItemRetry(path: path, title: title, targetApp: targetApp, attempt: attempt, reason: "Could not resolve menu element")
+            return
+        }
+
+        let pressResult = AXUIElementPerformAction(targetElement, kAXPressAction as CFString)
+        if pressResult == .success {
+            Logger.shared.info("Action performed successfully on attempt \(attempt) with AXPress")
+            return
+        }
+
+        Logger.shared.warning("AXPress failed on attempt \(attempt) for '\(title)' with result \(pressResult)")
+        let pickResult = AXUIElementPerformAction(targetElement, kAXPickAction as CFString)
+        if pickResult == .success {
+            Logger.shared.info("Action performed successfully on attempt \(attempt) with AXPick")
+            return
+        }
+
+        if performMenuItemShortcutFallback(for: targetElement, title: title, targetApp: targetApp, attempt: attempt) {
+            return
+        }
+
+        scheduleMenuItemRetry(path: path, title: title, targetApp: targetApp, attempt: attempt, reason: "AXPress=\(pressResult), AXPick=\(pickResult), shortcut fallback unavailable")
+    }
+
+    func resolveMenuElement(path: [Int], pid: pid_t) -> AXUIElement? {
+        let appElement = AXUIElementCreateApplication(pid)
+
+        var menuBarValue: AnyObject?
+        let menuBarResult = AXUIElementCopyAttributeValue(appElement, kAXMenuBarAttribute as CFString, &menuBarValue)
+        guard menuBarResult == .success,
+              menuBarValue != nil else {
+            Logger.shared.error("Failed to get menu bar for pid \(pid), result: \(menuBarResult)")
+            return nil
+        }
+        let menuBar = menuBarValue as! AXUIElement
+
+        var currentElement: AXUIElement = menuBar
+        for index in path {
+            var childrenValue: AnyObject?
+            let childrenResult = AXUIElementCopyAttributeValue(currentElement, kAXChildrenAttribute as CFString, &childrenValue)
+
+            guard childrenResult == .success,
+                  let children = childrenValue as? [AXUIElement],
+                  index < children.count else {
+                Logger.shared.error("Failed to navigate path \(path) at index \(index), result: \(childrenResult)")
+                return nil
+            }
+
+            currentElement = children[index]
+        }
+
+        return currentElement
+    }
+
+    func performMenuItemShortcutFallback(for element: AXUIElement, title: String, targetApp: NSRunningApplication, attempt: Int) -> Bool {
+        guard targetApp.isActive else {
+            Logger.shared.warning("Cannot send shortcut for '\(title)' on attempt \(attempt): target app not active")
+            return false
+        }
+
+        guard let keyCode = menuItemCommandKeyCode(for: element) else {
+            Logger.shared.warning("No command key equivalent available for '\(title)' on attempt \(attempt)")
+            return false
+        }
+
+        guard let eventSource = CGEventSource(stateID: .combinedSessionState),
+              let keyDown = CGEvent(keyboardEventSource: eventSource, virtualKey: keyCode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: eventSource, virtualKey: keyCode, keyDown: false) else {
+            Logger.shared.error("Failed creating keyboard events for shortcut fallback on '\(title)'")
+            return false
+        }
+
+        let flags = menuItemCommandFlags(for: element)
+        keyDown.flags = flags
+        keyUp.flags = flags
+        keyDown.postToPid(targetApp.processIdentifier)
+        keyUp.postToPid(targetApp.processIdentifier)
+        Logger.shared.info("Action performed successfully on attempt \(attempt) with shortcut fallback")
+        return true
+    }
+
+    func menuItemCommandKeyCode(for element: AXUIElement) -> CGKeyCode? {
+        if let virtualKey = readAXIntAttribute(from: element, attribute: kAXMenuItemCmdVirtualKeyAttribute as CFString) {
+            return CGKeyCode(virtualKey)
+        }
+
+        guard let commandCharacter = readAXStringAttribute(from: element, attribute: kAXMenuItemCmdCharAttribute as CFString) else {
+            return nil
+        }
+
+        return keyCode(for: commandCharacter)
+    }
+
+    func menuItemCommandFlags(for element: AXUIElement) -> CGEventFlags {
+        let rawModifiers = readAXIntAttribute(from: element, attribute: kAXMenuItemCmdModifiersAttribute as CFString) ?? 0
+        var flags: CGEventFlags = []
+
+        if rawModifiers & 1 != 0 {
+            flags.insert(.maskShift)
+        }
+        if rawModifiers & 2 != 0 {
+            flags.insert(.maskAlternate)
+        }
+        if rawModifiers & 4 != 0 {
+            flags.insert(.maskControl)
+        }
+        if rawModifiers & 8 == 0 {
+            flags.insert(.maskCommand)
+        }
+
+        return flags
+    }
+
+    func readAXIntAttribute(from element: AXUIElement, attribute: CFString) -> Int? {
+        var value: AnyObject?
+        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+        guard result == .success else {
+            return nil
+        }
+
+        if let number = value as? NSNumber {
+            return number.intValue
+        }
+
+        return nil
+    }
+
+    func readAXStringAttribute(from element: AXUIElement, attribute: CFString) -> String? {
+        var value: AnyObject?
+        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+        guard result == .success,
+              let stringValue = value as? String,
+              !stringValue.isEmpty else {
+            return nil
+        }
+
+        return stringValue
+    }
+
+    func keyCode(for commandCharacter: String) -> CGKeyCode? {
+        guard let scalar = commandCharacter.lowercased().unicodeScalars.first else {
+            return nil
+        }
+
+        switch scalar {
+        case "a": return CGKeyCode(kVK_ANSI_A)
+        case "b": return CGKeyCode(kVK_ANSI_B)
+        case "c": return CGKeyCode(kVK_ANSI_C)
+        case "d": return CGKeyCode(kVK_ANSI_D)
+        case "e": return CGKeyCode(kVK_ANSI_E)
+        case "f": return CGKeyCode(kVK_ANSI_F)
+        case "g": return CGKeyCode(kVK_ANSI_G)
+        case "h": return CGKeyCode(kVK_ANSI_H)
+        case "i": return CGKeyCode(kVK_ANSI_I)
+        case "j": return CGKeyCode(kVK_ANSI_J)
+        case "k": return CGKeyCode(kVK_ANSI_K)
+        case "l": return CGKeyCode(kVK_ANSI_L)
+        case "m": return CGKeyCode(kVK_ANSI_M)
+        case "n": return CGKeyCode(kVK_ANSI_N)
+        case "o": return CGKeyCode(kVK_ANSI_O)
+        case "p": return CGKeyCode(kVK_ANSI_P)
+        case "q": return CGKeyCode(kVK_ANSI_Q)
+        case "r": return CGKeyCode(kVK_ANSI_R)
+        case "s": return CGKeyCode(kVK_ANSI_S)
+        case "t": return CGKeyCode(kVK_ANSI_T)
+        case "u": return CGKeyCode(kVK_ANSI_U)
+        case "v": return CGKeyCode(kVK_ANSI_V)
+        case "w": return CGKeyCode(kVK_ANSI_W)
+        case "x": return CGKeyCode(kVK_ANSI_X)
+        case "y": return CGKeyCode(kVK_ANSI_Y)
+        case "z": return CGKeyCode(kVK_ANSI_Z)
+        case "0": return CGKeyCode(kVK_ANSI_0)
+        case "1": return CGKeyCode(kVK_ANSI_1)
+        case "2": return CGKeyCode(kVK_ANSI_2)
+        case "3": return CGKeyCode(kVK_ANSI_3)
+        case "4": return CGKeyCode(kVK_ANSI_4)
+        case "5": return CGKeyCode(kVK_ANSI_5)
+        case "6": return CGKeyCode(kVK_ANSI_6)
+        case "7": return CGKeyCode(kVK_ANSI_7)
+        case "8": return CGKeyCode(kVK_ANSI_8)
+        case "9": return CGKeyCode(kVK_ANSI_9)
+        case ",": return CGKeyCode(kVK_ANSI_Comma)
+        case ".": return CGKeyCode(kVK_ANSI_Period)
+        case "/": return CGKeyCode(kVK_ANSI_Slash)
+        case ";": return CGKeyCode(kVK_ANSI_Semicolon)
+        case "'": return CGKeyCode(kVK_ANSI_Quote)
+        case "[": return CGKeyCode(kVK_ANSI_LeftBracket)
+        case "]": return CGKeyCode(kVK_ANSI_RightBracket)
+        case "\\": return CGKeyCode(kVK_ANSI_Backslash)
+        case "-": return CGKeyCode(kVK_ANSI_Minus)
+        case "=": return CGKeyCode(kVK_ANSI_Equal)
+        case "`": return CGKeyCode(kVK_ANSI_Grave)
+        default: return nil
+        }
+    }
+
+    func scheduleMenuItemRetry(path: [Int], title: String, targetApp: NSRunningApplication, attempt: Int, reason: String) {
+        guard attempt < maxActionDispatchAttempts else {
+            Logger.shared.error("Giving up action dispatch for '\(title)' after \(attempt) attempt(s). Reason: \(reason)")
+            return
+        }
+
+        let nextAttempt = attempt + 1
+        let delay = actionDispatchRetryDelay * Double(attempt)
+        Logger.shared.warning("Retrying '\(title)' in \(delay)s (attempt \(nextAttempt)/\(maxActionDispatchAttempts)). Reason: \(reason)")
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self = self else { return }
+            self.executeMenuItemAction(path: path, title: title, targetApp: targetApp, attempt: nextAttempt)
+        }
     }
 }
 
