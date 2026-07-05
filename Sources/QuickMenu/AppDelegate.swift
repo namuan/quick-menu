@@ -8,7 +8,6 @@ import CoreGraphics
 extension UserDefaults {
     static let hasCompletedOnboardingKey = "hasCompletedOnboarding"
     static let skipAppleMenuKey = "skipAppleMenu"
-    static let showInStatusBarKey = "showInStatusBar"
     
     var hasCompletedOnboarding: Bool {
         get { bool(forKey: Self.hasCompletedOnboardingKey) }
@@ -18,11 +17,6 @@ extension UserDefaults {
     var skipAppleMenu: Bool {
         get { bool(forKey: Self.skipAppleMenuKey) }
         set { set(newValue, forKey: Self.skipAppleMenuKey) }
-    }
-    
-    var showInStatusBar: Bool {
-        get { bool(forKey: Self.showInStatusBarKey) }
-        set { set(newValue, forKey: Self.showInStatusBarKey) }
     }
 }
 
@@ -34,14 +28,12 @@ struct SearchableMenuItem {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    var statusItem: NSStatusItem?
     var globalHotkey: EventHotKeyRef?
-    var settingsWindow: NSWindow?
-    var onboardingWindow: NSWindow?
-    var permissionCheckTimer: Timer?
     var searchWindow: NSPanel?
+    var onboardingWindow: NSWindow?
     var currentFrontmostApp: NSRunningApplication?
     var currentMenuSearchIndex: [SearchableMenuItem] = []
+    var isTerminating = false
     let maxSearchResults = 50
     let maxActionDispatchAttempts = 4
     let actionDispatchRetryDelay: TimeInterval = 0.08
@@ -52,25 +44,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.info("Bundle identifier: \(Bundle.main.bundleIdentifier ?? "Unknown")")
         Logger.shared.info("Application finished launching")
         
-        // Set defaults
-        if UserDefaults.standard.object(forKey: UserDefaults.showInStatusBarKey) == nil {
-            UserDefaults.standard.showInStatusBar = true
-        }
         if UserDefaults.standard.object(forKey: UserDefaults.skipAppleMenuKey) == nil {
             UserDefaults.standard.skipAppleMenu = true
         }
         
-        Logger.shared.info("showInStatusBar: \(UserDefaults.standard.showInStatusBar)")
         Logger.shared.info("skipAppleMenu: \(UserDefaults.standard.skipAppleMenu)")
         Logger.shared.info("hasCompletedOnboarding: \(UserDefaults.standard.hasCompletedOnboarding)")
         
-        // Show onboarding if first launch
+        // Prevent app from appearing in the Dock or App Switcher
+        // when it has no visible windows (transient agent behavior)
+        NSApp.setActivationPolicy(.accessory)
+        
         if !UserDefaults.standard.hasCompletedOnboarding {
-            Logger.shared.info("Showing onboarding")
+            Logger.shared.info("First launch — showing onboarding")
             showOnboarding()
         } else {
-            Logger.shared.info("Skipping onboarding, setting up directly")
-            setupAfterOnboarding()
+            Logger.shared.info("Launching directly into search flow")
+            launchSearchFlow()
         }
     }
     
@@ -78,7 +68,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.info("Application will terminate")
         closeSearchWindow()
         unregisterGlobalHotkey()
-        permissionCheckTimer?.invalidate()
         Logger.shared.info("=== QuickMenu Stopped ===")
     }
     
@@ -86,6 +75,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func showOnboarding() {
         Logger.shared.info("Preparing onboarding window")
+        NSApp.setActivationPolicy(.regular)
+        
         let onboardingView = OnboardingView(isPresented: Binding(
             get: { self.onboardingWindow != nil },
             set: { if !$0 { self.onboardingCompleted() } }
@@ -111,120 +102,179 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func onboardingCompleted() {
-        Logger.shared.info("Onboarding completed")
+        Logger.shared.info("Onboarding completed — proceeding to search flow")
         UserDefaults.standard.hasCompletedOnboarding = true
         onboardingWindow?.close()
         onboardingWindow = nil
-        setupAfterOnboarding()
+        NSApp.setActivationPolicy(.accessory)
+        launchSearchFlow()
     }
     
-    func setupAfterOnboarding() {
-        Logger.shared.info("Running post-onboarding setup")
-        if UserDefaults.standard.showInStatusBar {
-            Logger.shared.info("Status bar is enabled; creating status item")
-            setupStatusBar()
-        } else {
-            Logger.shared.info("Status bar is disabled")
-        }
+    // MARK: - Single-run search flow
+    
+    func launchSearchFlow() {
+        Logger.shared.info("Starting single-run search flow")
         registerGlobalHotkey()
         
-        // Check permissions silently (don't show alert on startup)
         let hasPermission = checkAccessibilityPermissions(prompt: false)
         if !hasPermission {
-            Logger.shared.warning("Accessibility permission missing during setup")
-            // Show a gentle reminder after a short delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                Logger.shared.info("Showing delayed accessibility reminder")
-                self?.showPermissionReminder()
+            Logger.shared.warning("Accessibility permission missing — prompting user")
+            promptForPermission { [weak self] granted in
+                guard let self = self else { return }
+                if granted {
+                    Logger.shared.info("Permission granted after prompt — proceeding")
+                    DispatchQueue.main.async { self.performMenuCaptureAndSearch() }
+                } else {
+                    Logger.shared.info("User declined permission — terminating")
+                    self.terminateApp()
+                }
             }
-        } else {
-            Logger.shared.info("Accessibility permission already granted")
-        }
-    }
-    
-    // MARK: - Status Bar
-    
-    func setupStatusBar() {
-        Logger.shared.info("Setting up status bar item")
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        
-        if let button = statusItem?.button {
-            // Use app icon instead of emoji
-            if let appIcon = NSImage(named: "AppIcon") {
-                let iconSize: CGFloat = 18
-                appIcon.size = NSSize(width: iconSize, height: iconSize)
-                button.image = appIcon
-                button.image?.isTemplate = true
-                Logger.shared.debug("Status bar icon configured")
-            } else {
-                Logger.shared.warning("AppIcon asset not found for status bar")
-            }
-            button.action = #selector(statusBarClicked)
-            button.target = self
-            Logger.shared.debug("Status bar button action wired")
-        } else {
-            Logger.shared.error("Failed to access status bar button")
-        }
-        
-        updateStatusBarMenu()
-    }
-    
-    func updateStatusBarMenu() {
-        Logger.shared.info("Refreshing status bar menu")
-        let menu = NSMenu()
-        
-        // Show current permission status
-        let hasPermission = checkAccessibilityPermissions(prompt: false)
-        if !hasPermission {
-            Logger.shared.warning("Status bar menu showing accessibility warning")
-            let warningItem = NSMenuItem(
-                title: "⚠️ Accessibility Access Required",
-                action: #selector(openAccessibilitySettings),
-                keyEquivalent: ""
-            )
-            warningItem.target = self
-            menu.addItem(warningItem)
-            menu.addItem(NSMenuItem.separator())
-        }
-        
-        menu.addItem(NSMenuItem(title: "Search Menu Items", action: #selector(triggerMenuRebuild), keyEquivalent: ""))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Settings...", action: #selector(showSettings), keyEquivalent: ","))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
-        
-        statusItem?.menu = menu
-        Logger.shared.info("Status bar menu now has \(menu.items.count) items")
-    }
-    
-    @objc func statusBarClicked() {
-        Logger.shared.info("Status bar clicked")
-        // Check permissions first
-        if !checkAccessibilityPermissions(prompt: true) {
-            Logger.shared.warning("Status bar click blocked by missing accessibility permission")
             return
         }
-        triggerMenuRebuild()
+        
+        Logger.shared.info("Accessibility permission already granted")
+        performMenuCaptureAndSearch()
     }
     
-    @objc func showSettings() {
-        Logger.shared.info("Opening settings window")
-        if settingsWindow == nil {
-            Logger.shared.debug("Creating settings window")
-            settingsWindow = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                backing: .buffered,
-                defer: false
-            )
-            settingsWindow?.title = "QuickMenu Settings"
-            settingsWindow?.contentView = NSHostingView(rootView: ContentView())
+    func promptForPermission(completion: @escaping (Bool) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "Accessibility Access Required"
+        alert.informativeText = "QuickMenu needs Accessibility permissions to capture menu items from other applications. Without this permission, the app cannot function."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Quit")
+        
+        let response = alert.runModal()
+        Logger.shared.info("Permission prompt response: \(response.rawValue)")
+        if response == .alertFirstButtonReturn {
+            openAccessibilitySettings()
+            // Poll for permission
+            pollForPermission(completion: completion)
+        } else {
+            completion(false)
+        }
+    }
+    
+    func pollForPermission(completion: @escaping (Bool) -> Void) {
+        var attempts = 0
+        let maxAttempts = 60
+        
+        func check() {
+            attempts += 1
+            let hasPermission = checkAccessibilityPermissions(prompt: false)
+            if hasPermission {
+                Logger.shared.info("Permission granted after \(attempts) poll(s)")
+                completion(true)
+                return
+            }
+            if attempts >= maxAttempts {
+                Logger.shared.warning("Permission polling timed out after \(maxAttempts) attempts")
+                completion(false)
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: check)
         }
         
-        settingsWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        Logger.shared.info("Settings window visible")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: check)
     }
+    
+    func performMenuCaptureAndSearch() {
+        guard let targetApp = getTargetApplication() else {
+            Logger.shared.error("No suitable target application found — failing fast")
+            let alert = NSAlert()
+            alert.messageText = "No Target Application"
+            alert.informativeText = "QuickMenu could not find a suitable application to capture menu items from. Please make sure another app is open and try again."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Quit")
+            alert.runModal()
+            terminateApp()
+            return
+        }
+        
+        Logger.shared.info("Target application: \(targetApp.localizedName ?? "Unknown") (pid: \(targetApp.processIdentifier))")
+        
+        let pid = targetApp.processIdentifier
+        let appElement = AXUIElementCreateApplication(pid)
+        
+        var menuBarValue: AnyObject?
+        let menuBarResult = AXUIElementCopyAttributeValue(appElement, kAXMenuBarAttribute as CFString, &menuBarValue)
+        
+        guard menuBarResult == .success, let menuBar = menuBarValue else {
+            Logger.shared.error("Failed to get menu bar for \(targetApp.localizedName ?? "Unknown"), result: \(menuBarResult)")
+            let alert = NSAlert()
+            alert.messageText = "Menu Capture Failed"
+            alert.informativeText = "QuickMenu could not read the menu bar from \(targetApp.localizedName ?? "the active application"). This app may not expose its menu via Accessibility."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Quit")
+            alert.runModal()
+            terminateApp()
+            return
+        }
+        
+        Logger.shared.info("Got menu bar, building menu...")
+        
+        currentFrontmostApp = targetApp
+        
+        guard let rebuiltMenu = buildMenu(from: menuBar as! AXUIElement, path: []) else {
+            Logger.shared.error("Failed to rebuild menu")
+            terminateApp()
+            return
+        }
+
+        currentMenuSearchIndex = collectSearchableMenuItems(from: rebuiltMenu)
+        Logger.shared.info("Indexed \(currentMenuSearchIndex.count) searchable menu entries")
+
+        guard !currentMenuSearchIndex.isEmpty else {
+            Logger.shared.warning("No searchable entries found — failing fast")
+            let alert = NSAlert()
+            alert.messageText = "No Menu Items Found"
+            alert.informativeText = "QuickMenu did not find any menu items in \(targetApp.localizedName ?? "the active application"). This app may have an empty or inaccessible menu bar."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Quit")
+            alert.runModal()
+            terminateApp()
+            return
+        }
+
+        Logger.shared.info("Menu built with \(rebuiltMenu.items.count) top-level item(s) — opening instant search")
+        showInstantSearchWindow(with: currentMenuSearchIndex)
+    }
+    
+    // MARK: - Self-exclusion: avoid indexing QuickMenu itself
+    
+    func getTargetApplication() -> NSRunningApplication? {
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+            Logger.shared.warning("No frontmost application found")
+            return findAlternativeApplication()
+        }
+        
+        // If QuickMenu itself is the frontmost app, fall back
+        if frontApp.bundleIdentifier == Bundle.main.bundleIdentifier {
+            Logger.shared.info("Frontmost app is QuickMenu — finding alternative")
+            return findAlternativeApplication()
+        }
+        
+        return frontApp
+    }
+    
+    func findAlternativeApplication() -> NSRunningApplication? {
+        let ownBundleID = Bundle.main.bundleIdentifier
+        let runningApps = NSWorkspace.shared.runningApplications
+        
+        // Prefer regular apps that are not QuickMenu
+        if let alt = runningApps.first(where: { app in
+            app.activationPolicy == .regular &&
+            app.bundleIdentifier != ownBundleID
+        }) {
+            Logger.shared.info("Alternative target: \(alt.localizedName ?? "Unknown")")
+            return alt
+        }
+        
+        Logger.shared.warning("No alternative application found")
+        return nil
+    }
+    
+
     
     // MARK: - Accessibility Permissions
     
@@ -233,50 +283,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let options: CFDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary
         let hasPermission = AXIsProcessTrustedWithOptions(options)
         Logger.shared.debug("Accessibility permission check (prompt=\(prompt)) returned \(hasPermission)")
-        
-        if !hasPermission && prompt {
-            showPermissionDeniedAlert()
-        }
-        
         return hasPermission
-    }
-    
-    func showPermissionDeniedAlert() {
-        Logger.shared.warning("Showing permission denied alert")
-        let alert = NSAlert()
-        alert.messageText = "Accessibility Access Required"
-        alert.informativeText = "QuickMenu needs Accessibility permissions to capture menu items from other applications. Without this permission, the app cannot function."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Cancel")
-        
-        let response = alert.runModal()
-        Logger.shared.info("Permission denied alert response: \(response.rawValue)")
-        if response == .alertFirstButtonReturn {
-            openAccessibilitySettings()
-        }
-    }
-    
-    func showPermissionReminder() {
-        Logger.shared.info("Showing permission reminder")
-        let alert = NSAlert()
-        alert.messageText = "Enable Accessibility Access"
-        alert.informativeText = "QuickMenu works best with Accessibility permissions enabled. This allows it to capture and display menus from other apps. Would you like to enable it now?"
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Remind Me Later")
-        
-        let response = alert.runModal()
-        Logger.shared.info("Permission reminder response: \(response.rawValue)")
-        if response == .alertFirstButtonReturn {
-            openAccessibilitySettings()
-        }
     }
     
     @objc func openAccessibilitySettings() {
         Logger.shared.info("Opening macOS Accessibility settings")
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
-            // Fallback to general security settings
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security") {
                 Logger.shared.warning("Using fallback system settings URL")
                 NSWorkspace.shared.open(url)
@@ -284,42 +296,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         NSWorkspace.shared.open(url)
-        
-        // Start monitoring for permission changes
-        startPermissionCheckTimer()
-    }
-    
-    func startPermissionCheckTimer() {
-        Logger.shared.info("Starting accessibility permission polling timer")
-        permissionCheckTimer?.invalidate()
-        permissionCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            
-            let hasPermission = self.checkAccessibilityPermissions(prompt: false)
-            if hasPermission {
-                Logger.shared.info("Accessibility permission became available")
-                DispatchQueue.main.async {
-                    self.permissionGrantedNotification()
-                }
-                self.permissionCheckTimer?.invalidate()
-                self.permissionCheckTimer = nil
-            }
-        }
-    }
-    
-    func permissionGrantedNotification() {
-        Logger.shared.info("Showing accessibility granted notification")
-        // Update status bar menu to remove warning
-        updateStatusBarMenu()
-        
-        // Show success notification
-        let alert = NSAlert()
-        alert.messageText = "Accessibility Access Granted"
-        alert.informativeText = "Thank you! QuickMenu now has the permissions it needs. You can start using Command + Shift + M to open instant menu search."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Got it!")
-        alert.runModal()
-        Logger.shared.info("Accessibility granted notification acknowledged")
     }
     
     // MARK: - Global Hotkey
@@ -380,71 +356,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.info("hotkeyPressed called")
         DispatchQueue.main.async {
             Logger.shared.info("Processing hotkey on main thread")
-            // Check permissions before triggering
-            guard self.checkAccessibilityPermissions(prompt: true) else {
-                Logger.shared.warning("Permission check failed")
-                return
-            }
-
             if self.searchWindow != nil {
                 Logger.shared.info("Closing search dialog via hotkey")
                 self.closeSearchWindow()
             } else {
-                Logger.shared.info("Opening search dialog via hotkey")
-                self.triggerMenuRebuild()
+                Logger.shared.info("Re-opening search dialog via hotkey")
+                self.performMenuCaptureAndSearch()
             }
         }
     }
     
-    // MARK: - Menu Capture and Rebuild
-    
-    @objc func triggerMenuRebuild() {
-        Logger.shared.info("triggerMenuRebuild called")
-        
-        guard let frontApp = NSWorkspace.shared.frontmostApplication else {
-            Logger.shared.error("Could not get frontmost application")
-            return
-        }
-        
-        Logger.shared.info("Frontmost app: \(frontApp.localizedName ?? "Unknown") (pid: \(frontApp.processIdentifier))")
-        
-        let pid = frontApp.processIdentifier
-        let appElement = AXUIElementCreateApplication(pid)
-        
-        // Get the menu bar
-        var menuBarValue: AnyObject?
-        let menuBarResult = AXUIElementCopyAttributeValue(appElement, kAXMenuBarAttribute as CFString, &menuBarValue)
-        
-        guard menuBarResult == .success, let menuBar = menuBarValue else {
-            Logger.shared.error("Failed to get menu bar for \(frontApp.localizedName ?? "Unknown"), result: \(menuBarResult)")
-            return
-        }
-        
-        Logger.shared.info("Got menu bar, building menu...")
-        
-        // Store current frontmost app for later use
-        currentFrontmostApp = frontApp
-        
-        // Build the menu
-        guard let rebuiltMenu = buildMenu(from: menuBar as! AXUIElement, path: []) else {
-            Logger.shared.error("Failed to rebuild menu")
-            return
-        }
 
-        currentMenuSearchIndex = collectSearchableMenuItems(from: rebuiltMenu)
-        Logger.shared.info("Indexed \(currentMenuSearchIndex.count) searchable menu entries")
-
-        guard !currentMenuSearchIndex.isEmpty else {
-            Logger.shared.warning("No searchable entries were found")
-            return
-        }
-
-        Logger.shared.info("Menu built with \(rebuiltMenu.items.count) top-level item(s)")
-        Logger.shared.info("Opening instant search directly")
-        showInstantSearchWindow(with: currentMenuSearchIndex)
-        
-        Logger.shared.info("triggerMenuRebuild completed")
-    }
 
     func showInstantSearchWindow(with searchableItems: [SearchableMenuItem]) {
         closeSearchWindow()
@@ -478,7 +400,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             onSelect: { [weak self] selected in
                 guard let self = self else { return }
                 Logger.shared.info("Instant search selected: \(selected.breadcrumb)")
-                self.closeSearchWindow()
+                // Dismiss the search window without terminating (termination happens after action executes)
+                if let window = self.searchWindow {
+                    window.orderOut(nil)
+                    window.close()
+                    self.searchWindow = nil
+                }
                 self.executeMenuItem(path: selected.path, title: selected.title)
             },
             onClose: { [weak self] in
@@ -568,11 +495,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         searchWindow = nil
         currentMenuSearchIndex = []
         Logger.shared.debug("Search window closed and index cleared")
+        
+        // In single-run mode, closing the search dialog terminates the app
+        terminateApp()
     }
 
     func executeMenuItem(path: [Int], title: String) {
         let proxyItem = NSMenuItem(title: title, action: #selector(menuItemSelected(_:)), keyEquivalent: "")
         proxyItem.representedObject = path
+        proxyItem.tag = 0 // tag 0 means close and quit after execution
         menuItemSelected(proxyItem)
     }
 
@@ -725,28 +656,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.info("Executing action against app: \(targetApp.localizedName ?? "Unknown") (pid: \(targetApp.processIdentifier))")
         let didActivate = targetApp.activate(options: [.activateIgnoringOtherApps])
         Logger.shared.info("Target activation request result: \(didActivate)")
-        executeMenuItemAction(path: path, title: sender.title, targetApp: targetApp, attempt: 1)
+        executeMenuItemAction(path: path, title: sender.title, targetApp: targetApp, attempt: 1) { [weak self] in
+            // Terminate only after the action dispatch completes (success or exhausted retries)
+            Logger.shared.info("Action dispatch finished — terminating")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                self?.terminateApp()
+            }
+        }
         
-        Logger.shared.info("menuItemSelected completed")
+        Logger.shared.info("menuItemSelected dispatched")
     }
 
-    func executeMenuItemAction(path: [Int], title: String, targetApp: NSRunningApplication, attempt: Int) {
+    func executeMenuItemAction(path: [Int], title: String, targetApp: NSRunningApplication, attempt: Int, completion: @escaping () -> Void) {
         let pid = targetApp.processIdentifier
         if !targetApp.isActive {
             let didActivate = targetApp.activate(options: [.activateIgnoringOtherApps])
             Logger.shared.warning("Target app not active on attempt \(attempt); activation requested=\(didActivate)")
-            scheduleMenuItemRetry(path: path, title: title, targetApp: targetApp, attempt: attempt, reason: "Target app is not active yet")
+            scheduleMenuItemRetry(path: path, title: title, targetApp: targetApp, attempt: attempt, reason: "Target app is not active yet", completion: completion)
             return
         }
 
         guard let targetElement = resolveMenuElement(path: path, pid: pid) else {
-            scheduleMenuItemRetry(path: path, title: title, targetApp: targetApp, attempt: attempt, reason: "Could not resolve menu element")
+            scheduleMenuItemRetry(path: path, title: title, targetApp: targetApp, attempt: attempt, reason: "Could not resolve menu element", completion: completion)
             return
         }
 
         let pressResult = AXUIElementPerformAction(targetElement, kAXPressAction as CFString)
         if pressResult == .success {
             Logger.shared.info("Action performed successfully on attempt \(attempt) with AXPress")
+            completion()
             return
         }
 
@@ -754,14 +692,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let pickResult = AXUIElementPerformAction(targetElement, kAXPickAction as CFString)
         if pickResult == .success {
             Logger.shared.info("Action performed successfully on attempt \(attempt) with AXPick")
+            completion()
             return
         }
 
         if performMenuItemShortcutFallback(for: targetElement, title: title, targetApp: targetApp, attempt: attempt) {
+            completion()
             return
         }
 
-        scheduleMenuItemRetry(path: path, title: title, targetApp: targetApp, attempt: attempt, reason: "AXPress=\(pressResult), AXPick=\(pickResult), shortcut fallback unavailable")
+        scheduleMenuItemRetry(path: path, title: title, targetApp: targetApp, attempt: attempt, reason: "AXPress=\(pressResult), AXPick=\(pickResult), shortcut fallback unavailable", completion: completion)
     }
 
     func resolveMenuElement(path: [Int], pid: pid_t) -> AXUIElement? {
@@ -936,9 +876,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func scheduleMenuItemRetry(path: [Int], title: String, targetApp: NSRunningApplication, attempt: Int, reason: String) {
+    func scheduleMenuItemRetry(path: [Int], title: String, targetApp: NSRunningApplication, attempt: Int, reason: String, completion: @escaping () -> Void) {
         guard attempt < maxActionDispatchAttempts else {
             Logger.shared.error("Giving up action dispatch for '\(title)' after \(attempt) attempt(s). Reason: \(reason)")
+            completion()
             return
         }
 
@@ -948,8 +889,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self = self else { return }
-            self.executeMenuItemAction(path: path, title: title, targetApp: targetApp, attempt: nextAttempt)
+            self.executeMenuItemAction(path: path, title: title, targetApp: targetApp, attempt: nextAttempt, completion: completion)
         }
+    }
+    
+    // MARK: - Termination (idempotent, race-resistant)
+    
+    func terminateApp() {
+        guard !isTerminating else {
+            Logger.shared.debug("Termination already in progress — ignoring duplicate signal")
+            return
+        }
+        isTerminating = true
+        Logger.shared.info("Terminating QuickMenu")
+        closeSearchWindowImmediate()
+        unregisterGlobalHotkey()
+        NSApplication.shared.terminate(nil)
+    }
+    
+    /// Close the search window without triggering terminateApp (used internally during termination)
+    func closeSearchWindowImmediate() {
+        guard let window = searchWindow else { return }
+        window.orderOut(nil)
+        window.close()
+        searchWindow = nil
+        currentMenuSearchIndex = []
     }
 }
 

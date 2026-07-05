@@ -238,7 +238,7 @@ struct OnboardingView: View {
                 .font(.title)
                 .fontWeight(.bold)
             
-            Text("QuickMenu is now running in your status bar. Here's how to use it:")
+            Text("QuickMenu is now ready. Launch it anytime to instantly search any app's menu:")
                 .font(.body)
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
@@ -253,9 +253,9 @@ struct OnboardingView: View {
                         .cornerRadius(8)
                     
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Command + Shift + M")
+                        Text("Launch from Finder / Dock")
                             .font(.headline)
-                        Text("Open or close instant menu search")
+                        Text("Opens instant menu search for the frontmost app")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
@@ -269,25 +269,25 @@ struct OnboardingView: View {
                         .cornerRadius(8)
                     
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Status Bar Icon")
+                        Text("Instant Search")
                             .font(.headline)
-                        Text("Open search from the status bar menu")
+                        Text("Type to filter across menu and submenu items")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
                 }
                 
                 HStack(spacing: 16) {
-                    Text("⚙️")
+                    Text("⌨️")
                         .font(.system(size: 24))
                         .frame(width: 40, height: 40)
                         .background(Color.blue.opacity(0.2))
                         .cornerRadius(8)
                     
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Settings")
+                        Text("Keyboard Navigation")
                             .font(.headline)
-                        Text("Access settings from the status bar menu")
+                        Text("Tab, arrows, and Enter to browse and select")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }

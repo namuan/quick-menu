@@ -3,7 +3,6 @@ import SwiftUI
 struct ContentView: View {
     @State private var hotkeyDescription = "Command + Shift + M"
     @State private var skipAppleMenu = true
-    @State private var showInStatusBar = true
     
     var body: some View {
         VStack(spacing: 20) {
@@ -27,7 +26,6 @@ struct ContentView: View {
                 
                 Section(header: Text("Menu Options")) {
                     Toggle("Skip Apple Menu", isOn: $skipAppleMenu)
-                    Toggle("Show in Status Bar", isOn: $showInStatusBar)
                 }
                 
                 Section(header: Text("Permissions")) {
@@ -61,7 +59,7 @@ struct ContentView: View {
                 Text("Usage")
                     .font(.headline)
                 
-                Text("Press Command + Shift + M to open instant search for the frontmost application. Press it again to close the search dialog.")
+                Text("Launch QuickMenu to instantly search the frontmost app's menu. Press Command + Shift + M to dismiss or reopen the search dialog during a session.")
                     .font(.body)
                     .multilineTextAlignment(.center)
                     .foregroundColor(.secondary)
